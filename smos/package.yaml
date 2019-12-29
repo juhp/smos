@@ -24,6 +24,7 @@ library:
   - cursor-fuzzy-time
   - filelock
   - fuzzy-time
+  - githash
   - megaparsec
   - microlens
   - mtl
@@ -38,6 +39,7 @@ library:
   - smos-data
   - smos-report
   - smos-report-cursor
+  - template-haskell
   - text
   - time
   - unordered-containers

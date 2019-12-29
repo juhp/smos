@@ -12,7 +12,7 @@ import Import
 import qualified Data.Text as T
 
 import qualified System.Environment as System
-import System.Exit (die)
+import System.Exit (die, exitSuccess)
 
 import Options.Applicative
 
@@ -23,6 +23,7 @@ import qualified Smos.Report.OptParse as Report
 import Smos.Actions
 import Smos.Keys
 import Smos.Types
+import Smos.Version
 
 getInstructions :: SmosConfig -> IO Instructions
 getInstructions conf = do
@@ -179,7 +180,12 @@ getEnvironment :: IO Environment
 getEnvironment = Environment <$> Report.getEnvironment
 
 getArguments :: IO Arguments
-getArguments = runArgumentsParser <$> System.getArgs >>= handleParseResult
+getArguments = do
+  args <- System.getArgs
+  when ("--version" `elem` args) $ do
+    putStrLn versionMessage
+    exitSuccess
+  handleParseResult $ runArgumentsParser args
 
 runArgumentsParser :: [String] -> ParserResult Arguments
 runArgumentsParser = execParserPure prefs_ argParser
