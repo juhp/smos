@@ -7,13 +7,13 @@ with final.haskell.lib;
       smosPkg =
         name:
           doBenchmark (
-            addBuildDepend (
+            addBuildDepends (
               failOnAllWarnings (
                 disableLibraryProfiling (
                   final.haskellPackages.callCabal2nix name ( final.gitignoreSource ( ../. + "/${name}" ) ) {}
                 )
               )
-            ) ( final.haskellPackages.autoexporter )
+            ) [ final.haskellPackages.autoexporter final.git ]
           );
     in
       final.lib.genAttrs [
