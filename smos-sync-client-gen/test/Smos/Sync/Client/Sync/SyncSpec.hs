@@ -191,7 +191,14 @@ testInitialSync :: ClientEnv -> Token -> IO ClientStore
 testInitialSync cenv token = testC cenv $ runInitialSync token
 
 testSync :: ClientEnv -> Token -> ClientStore -> IO ClientStore
-testSync cenv token cs = testC cenv $ runSync token cs
+testSync cenv token cs =
+  testC cenv $ do
+    resp <- runSync token cs
+    pure $
+      cs
+        { clientStoreItems =
+            Mergeful.mergeSyncResponseFromServer (clientStoreItems cs) (syncResponseItems resp)
+        }
 
 testC :: ClientEnv -> C a -> IO a
 testC cenv func =

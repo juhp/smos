@@ -8,14 +8,18 @@ module Smos.Sync.Client.Command.Sync where
 
 import Data.Aeson as JSON
 import Data.Aeson.Encode.Pretty as JSON
+import qualified Data.ByteString as SB
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LB
 import Data.Hashable
 import Data.Map (Map)
 import qualified Data.Map as M
+import qualified Data.Set as S
+import Data.Set (Set)
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
+import Data.UUID.Typed
 import Data.Validity.UUID ()
 import Text.Show.Pretty
 
@@ -84,9 +88,28 @@ syncSmosSyncClient Settings {..} SyncSettings {..} =
                   let store = consolidateMetaMapWithFiles meta files
                   pure $ ClientStore {clientStoreServerUUID = uuid, clientStoreItems = store}
             logDebugData "CLIENT STORE BEFORE SYNC" clientStore
-            newClientStore <- runSync token clientStore
-            logDebugData "CLIENT STORE AFTER SYNC" newClientStore
-            saveClientStore syncSetIgnoreFiles syncSetContentsDir newClientStore
+            response <- runSync token clientStore
+            updateClientStoreWithSyncResponse
+              syncSetIgnoreFiles
+              syncSetContentsDir
+              (Mergeful.makeSyncRequest $ clientStoreItems clientStore)
+              response
+            -- when (setLogLevel >= LevelDebug) $ do
+            --   newFiles <- liftIO $ readFilteredSyncFiles syncSetIgnoreFiles syncSetContentsDir
+            --   let newClientStoreActual =
+            --         clientStore {clientStoreItems = consolidateMetaMapWithFiles meta newFiles}
+            --   logDebugData "CLIENT STORE AFTER SYNC" newClientStoreActual
+            --   let newClientStoreExpected =
+            --         clientStore
+            --           { clientStoreItems =
+            --               Mergeful.mergeSyncResponseFromServer
+            --                 (clientStoreItems clientStore)
+            --                 (syncResponseItems response)
+            --           }
+            --   unless (newClientStoreActual == newClientStoreExpected) $ do
+            --     logDebugData "CLIENT STORE AFTER SYNC" newClientStoreExpected
+            --     logErrorN
+            --       "Something went wrong while syncing. The optimised sync resulted in something different than the unoptimised response."
             logDebugN "CLIENT END"
 
 runInitialSync :: Token -> C ClientStore
@@ -106,7 +129,7 @@ runInitialSync token = do
   logDebugN "INITIAL SYNC END"
   pure newClientStore
 
-runSync :: Token -> ClientStore -> C ClientStore
+runSync :: Token -> ClientStore -> C SyncResponse
 runSync token clientStore = do
   logDebugN "SYNC START"
   let items = clientStoreItems clientStore
@@ -124,13 +147,8 @@ runSync token clientStore = do
       , "If you want to sync anyway, remove the client metadata file and sync again."
       , "Note that you can lose data by doing this, so make a backup first."
       ]
-  let newClientStore =
-        clientStore
-          { clientStoreServerUUID = syncResponseServerId
-          , clientStoreItems = Mergeful.mergeSyncResponseFromServer items syncResponseItems
-          }
   logDebugN "SYNC END"
-  pure newClientStore
+  pure resp
 
 logInfoJsonData :: ToJSON a => Text -> a -> C ()
 logInfoJsonData name a =
@@ -257,22 +275,118 @@ consolidateMetaMapWithFiles clientMetaDataMap contentsMap
         syncedChangedAndDeleted
         (contentsMapFiles contentsMap `M.difference` metaMapFiles clientMetaDataMap)
 
--- We will trust hashing. (TODO do we need to fix that?)
 isUnchanged :: SyncFileMeta -> ByteString -> Bool
 isUnchanged SyncFileMeta {..} contents =
   case (syncFileMetaHashOld, syncFileMetaHash) of
     (Nothing, Nothing) -> False -- Mark as changed, then we'll get a new hash later.
     (Just i, Nothing) -> hash contents == i
-    (_, Just sha) -> SHA256.hashBytes contents == sha
+    (Nothing, Just sha) -> SHA256.hashBytes contents == sha
+    (Just i, Just sha) -> hash contents == i && SHA256.hashBytes contents == sha
 
--- TODO this could be probably optimised using the sync response
-saveClientStore :: IgnoreFiles -> Path Abs Dir -> ClientStore -> C ()
-saveClientStore igf dir store =
-  case makeClientMetaData igf store of
-    Nothing -> liftIO $ die "Something went wrong while building the metadata store"
-    Just mm -> do
-      runDB $ writeClientMetadata mm
-      liftIO $ saveSyncFiles igf dir $ clientStoreItems store
+updateClientStoreWithSyncResponse ::
+     IgnoreFiles -> Path Abs Dir -> SyncRequest -> SyncResponse -> C ()
+updateClientStoreWithSyncResponse igf dir Mergeful.SyncRequest {..} resp =
+  runDB $ do
+    let Mergeful.SyncResponse {..} = syncResponseItems resp
+    updateClientAdded syncRequestNewItems syncResponseClientAdded
+    updateClientChanged syncResponseClientChanged
+    updateClientDeleted syncResponseClientDeleted
+    updateServerAdded dir syncResponseServerAdded
+    updateServerChanged dir syncResponseServerChanged
+    updateServerDeleted dir syncResponseServerDeleted
+    updateChangeConflict dir syncResponseConflicts
+    updateClientDeletedConflict dir syncResponseConflictsClientDeleted
+    updateServerDeletedConflict dir syncResponseConflictsServerDeleted
 
-saveSyncFiles :: IgnoreFiles -> Path Abs Dir -> Mergeful.ClientStore FileUUID SyncFile -> IO ()
-saveSyncFiles igf dir store = saveContentsMap igf dir $ makeContentsMap store
+updateClientAdded ::
+     MonadIO m
+  => Map Mergeful.ClientId SyncFile
+  -> Map Mergeful.ClientId (Mergeful.ClientAddition FileUUID)
+  -> SqlPersistT m ()
+updateClientAdded r =
+  fmap void . M.traverseWithKey $ \cid Mergeful.ClientAddition {..} ->
+    case M.lookup cid r of
+      Nothing -> pure () -- Should not happen, but not a big deal if it does.
+      Just SyncFile {..} ->
+        void $
+        insertBy -- Insert into the database, assume that it worked
+          ClientFile
+            { clientFileUuid = clientAdditionId
+            , clientFilePath = syncFilePath
+            , clientFileHash = Just $ hash syncFileContents
+            , clientFileSha256 = Just $ SHA256.hashBytes syncFileContents
+            , clientFileTime = clientAdditionServerTime
+            }
+        -- No need to write to the file, the client added it so it's already there.
+
+updateClientChanged :: MonadIO m => Map FileUUID Mergeful.ServerTime -> SqlPersistT m ()
+updateClientChanged =
+  fmap void . M.traverseWithKey $ \u st -> updateWhere [ClientFileUuid ==. u] [ClientFileTime =. st]
+  -- No need to write to the file, the client changed it so it's already there.
+
+updateClientDeleted :: MonadIO m => Set FileUUID -> SqlPersistT m ()
+updateClientDeleted s = forM_ (S.toList s) $ \u -> deleteBy $ UniqueUUID u
+  -- No need to delete the file because it was already deleted on the client side.
+
+updateServerAdded ::
+     MonadIO m => Path Abs Dir -> Map FileUUID (Mergeful.Timed SyncFile) -> SqlPersistT m ()
+updateServerAdded = updateUpdates
+  -- We have to use 'updateUpdates' here because the server doesn't know about the
+  -- file path uniqueness constraint.
+
+updateServerChanged ::
+     MonadIO m => Path Abs Dir -> Map FileUUID (Mergeful.Timed SyncFile) -> SqlPersistT m ()
+updateServerChanged = updateUpdates
+
+updateServerDeleted :: MonadIO m => Path Abs Dir -> Set FileUUID -> SqlPersistT m ()
+updateServerDeleted = updateDeletions
+
+updateChangeConflict ::
+     MonadIO m => Path Abs Dir -> Map FileUUID (Mergeful.Timed SyncFile) -> SqlPersistT m ()
+updateChangeConflict = updateUpdates
+  -- Take the server conflicts as updates
+  -- We just take what the server gives
+
+updateClientDeletedConflict ::
+     MonadIO m => Path Abs Dir -> Map FileUUID (Mergeful.Timed SyncFile) -> SqlPersistT m ()
+updateClientDeletedConflict = updateUpdates
+  -- Take the server conflicts as updates
+  -- We just take what the server gives and ignore that it was deleted client-side.
+
+updateServerDeletedConflict :: MonadIO m => Path Abs Dir -> Set FileUUID -> SqlPersistT m ()
+updateServerDeletedConflict = updateDeletions
+  -- Take the server deletions as deletions
+  -- We just take what the server gives and ignore that it was updated client-side.
+
+updateUpdates ::
+     MonadIO m => Path Abs Dir -> Map FileUUID (Mergeful.Timed SyncFile) -> SqlPersistT m ()
+updateUpdates d =
+  fmap void . M.traverseWithKey $ \u (Mergeful.Timed SyncFile {..} st) -> do
+    let h = Just $ hash syncFileContents
+        sha = Just $ SHA256.hashBytes syncFileContents
+    void $
+      upsertBy
+        (UniquePath syncFilePath) -- Insert into the database, assume that it worked
+        (ClientFile
+           { clientFileUuid = u
+           , clientFilePath = syncFilePath
+           , clientFileHash = h
+           , clientFileSha256 = sha
+           , clientFileTime = st
+           })
+        [ClientFileUuid =. u, ClientFileHash =. h, ClientFileSha256 =. sha, ClientFileTime =. st]
+    let fp = d </> syncFilePath
+    liftIO $ SB.writeFile (fromAbsFile fp) syncFileContents
+
+updateDeletions :: MonadIO m => Path Abs Dir -> Set FileUUID -> SqlPersistT m ()
+updateDeletions d s =
+  forM_ (S.toList s) $ \u -> do
+    mcf <- getBy $ UniqueUUID u
+    case mcf of
+      Nothing ->
+        error $
+        "Did not find the metadata for the item that the server told us to delete: " <> uuidString u
+      Just (Entity i ClientFile {..}) -> do
+        let fp = d </> clientFilePath
+        delete i
+        liftIO $ removeFile fp
