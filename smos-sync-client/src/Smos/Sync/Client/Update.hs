@@ -25,6 +25,7 @@ import Database.Persist.Sql as DB
 
 import Smos.Client
 
+import Smos.Sync.Client.Contents
 import Smos.Sync.Client.DB
 import Smos.Sync.Client.OptParse.Types
 
@@ -111,33 +112,41 @@ updateUpdates ::
   -> Path Abs Dir
   -> Map FileUUID (Mergeful.Timed SyncFile)
   -> SqlPersistT m ()
-updateUpdates _ d =
-  fmap void . M.traverseWithKey $ \u (Mergeful.Timed SyncFile {..} st) -> do
-    let h = Just $ hash syncFileContents
-        sha = Just $ SHA256.hashBytes syncFileContents
-    void $
-      upsertBy
-        (UniquePath syncFilePath) -- Insert into the database, assume that it worked
-        (ClientFile
-           { clientFileUuid = u
-           , clientFilePath = syncFilePath
-           , clientFileHash = h
-           , clientFileSha256 = sha
-           , clientFileTime = st
-           })
-        [ClientFileUuid =. u, ClientFileHash =. h, ClientFileSha256 =. sha, ClientFileTime =. st]
-    let fp = d </> syncFilePath
-    liftIO $ SB.writeFile (fromAbsFile fp) syncFileContents
+updateUpdates igf d =
+  fmap void . M.traverseWithKey $ \u (Mergeful.Timed SyncFile {..} st) ->
+    when (ignoreFilePred igf syncFilePath) $ do
+      let h = Just $ hash syncFileContents
+          sha = Just $ SHA256.hashBytes syncFileContents
+      void $
+        upsertBy
+          (UniquePath syncFilePath) -- Insert into the database, assume that it worked
+          (ClientFile
+             { clientFileUuid = u
+             , clientFilePath = syncFilePath
+             , clientFileHash = h
+             , clientFileSha256 = sha
+             , clientFileTime = st
+             })
+          [ClientFileUuid =. u, ClientFileHash =. h, ClientFileSha256 =. sha, ClientFileTime =. st]
+      let fp = d </> syncFilePath
+      liftIO $ SB.writeFile (fromAbsFile fp) syncFileContents
 
 updateDeletions :: MonadIO m => IgnoreFiles -> Path Abs Dir -> Set FileUUID -> SqlPersistT m ()
-updateDeletions _ d s =
+updateDeletions igf d s =
   forM_ (S.toList s) $ \u -> do
     mcf <- getBy $ UniqueUUID u
     case mcf of
       Nothing ->
         error $
         "Did not find the metadata for the item that the server told us to delete: " <> uuidString u
-      Just (Entity i ClientFile {..}) -> do
-        let fp = d </> clientFilePath
-        delete i
-        liftIO $ removeFile fp
+      Just (Entity i ClientFile {..}) ->
+        when (ignoreFilePred igf clientFilePath) $ do
+          let fp = d </> clientFilePath
+          delete i
+          liftIO $ removeFile fp
+
+ignoreFilePred :: IgnoreFiles -> Path Rel File -> Bool
+ignoreFilePred igf =
+  case igf of
+    IgnoreNothing -> const True
+    IgnoreHiddenFiles -> not . isHidden
