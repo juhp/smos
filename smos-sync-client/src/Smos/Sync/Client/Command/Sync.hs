@@ -46,6 +46,7 @@ import Smos.Sync.Client.Meta
 import Smos.Sync.Client.MetaMap (MetaMap(..))
 import Smos.Sync.Client.OptParse
 import Smos.Sync.Client.OptParse.Types
+import Smos.Sync.Client.Update
 
 syncSmosSyncClient :: Settings -> SyncSettings -> IO ()
 syncSmosSyncClient Settings {..} SyncSettings {..} =
@@ -84,9 +85,28 @@ syncSmosSyncClient Settings {..} SyncSettings {..} =
                   let store = consolidateMetaMapWithFiles meta files
                   pure $ ClientStore {clientStoreServerUUID = uuid, clientStoreItems = store}
             logDebugData "CLIENT STORE BEFORE SYNC" clientStore
-            newClientStore <- runSync token clientStore
-            logDebugData "CLIENT STORE AFTER SYNC" newClientStore
-            saveClientStore syncSetIgnoreFiles syncSetContentsDir newClientStore
+            response <- runSync token clientStore
+            updateClientStoreWithSyncResponse
+              syncSetIgnoreFiles
+              syncSetContentsDir
+              (Mergeful.makeSyncRequest $ clientStoreItems clientStore)
+              response
+            -- when (setLogLevel >= LevelDebug) $ do
+            --   newFiles <- liftIO $ readFilteredSyncFiles syncSetIgnoreFiles syncSetContentsDir
+            --   let newClientStoreActual =
+            --         clientStore {clientStoreItems = consolidateMetaMapWithFiles meta newFiles}
+            --   logDebugData "CLIENT STORE AFTER SYNC" newClientStoreActual
+            --   let newClientStoreExpected =
+            --         clientStore
+            --           { clientStoreItems =
+            --               Mergeful.mergeSyncResponseFromServer
+            --                 (clientStoreItems clientStore)
+            --                 (syncResponseItems response)
+            --           }
+            --   unless (newClientStoreActual == newClientStoreExpected) $ do
+            --     logDebugData "CLIENT STORE AFTER SYNC" newClientStoreExpected
+            --     logErrorN
+            --       "Something went wrong while syncing. The optimised sync resulted in something different than the unoptimised response."
             logDebugN "CLIENT END"
 
 runInitialSync :: Token -> C ClientStore
@@ -106,7 +126,7 @@ runInitialSync token = do
   logDebugN "INITIAL SYNC END"
   pure newClientStore
 
-runSync :: Token -> ClientStore -> C ClientStore
+runSync :: Token -> ClientStore -> C SyncResponse
 runSync token clientStore = do
   logDebugN "SYNC START"
   let items = clientStoreItems clientStore
@@ -124,13 +144,8 @@ runSync token clientStore = do
       , "If you want to sync anyway, remove the client metadata file and sync again."
       , "Note that you can lose data by doing this, so make a backup first."
       ]
-  let newClientStore =
-        clientStore
-          { clientStoreServerUUID = syncResponseServerId
-          , clientStoreItems = Mergeful.mergeSyncResponseFromServer items syncResponseItems
-          }
   logDebugN "SYNC END"
-  pure newClientStore
+  pure resp
 
 logInfoJsonData :: ToJSON a => Text -> a -> C ()
 logInfoJsonData name a =
@@ -257,22 +272,25 @@ consolidateMetaMapWithFiles clientMetaDataMap contentsMap
         syncedChangedAndDeleted
         (contentsMapFiles contentsMap `M.difference` metaMapFiles clientMetaDataMap)
 
--- We will trust hashing. (TODO do we need to fix that?)
 isUnchanged :: SyncFileMeta -> ByteString -> Bool
 isUnchanged SyncFileMeta {..} contents =
   case (syncFileMetaHashOld, syncFileMetaHash) of
     (Nothing, Nothing) -> False -- Mark as changed, then we'll get a new hash later.
     (Just i, Nothing) -> hash contents == i
-    (_, Just sha) -> SHA256.hashBytes contents == sha
+    (Nothing, Just sha) -> SHA256.hashBytes contents == sha
+    (Just i, Just sha) -> hash contents == i && SHA256.hashBytes contents == sha
 
--- TODO this could be probably optimised using the sync response
-saveClientStore :: IgnoreFiles -> Path Abs Dir -> ClientStore -> C ()
-saveClientStore igf dir store =
-  case makeClientMetaData igf store of
-    Nothing -> liftIO $ die "Something went wrong while building the metadata store"
-    Just mm -> do
-      runDB $ writeClientMetadata mm
-      liftIO $ saveSyncFiles igf dir $ clientStoreItems store
-
-saveSyncFiles :: IgnoreFiles -> Path Abs Dir -> Mergeful.ClientStore FileUUID SyncFile -> IO ()
-saveSyncFiles igf dir store = saveContentsMap igf dir $ makeContentsMap store
+updateClientStoreWithSyncResponse ::
+     IgnoreFiles -> Path Abs Dir -> SyncRequest -> SyncResponse -> C ()
+updateClientStoreWithSyncResponse igf dir Mergeful.SyncRequest {..} resp =
+  runDB $ do
+    let Mergeful.SyncResponse {..} = syncResponseItems resp
+    updateClientAdded syncRequestNewItems syncResponseClientAdded
+    updateClientChanged syncResponseClientChanged
+    updateClientDeleted syncResponseClientDeleted
+    updateServerAdded igf dir syncResponseServerAdded
+    updateServerChanged igf dir syncResponseServerChanged
+    updateServerDeleted igf dir syncResponseServerDeleted
+    updateChangeConflict igf dir syncResponseConflicts
+    updateClientDeletedConflict igf dir syncResponseConflictsClientDeleted
+    updateServerDeletedConflict igf dir syncResponseConflictsServerDeleted

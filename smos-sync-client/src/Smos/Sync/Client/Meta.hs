@@ -12,8 +12,6 @@ import qualified Data.Mergeful.Timed as Mergeful
 
 import Pantry.SHA256 as SHA256
 
-import Path
-
 import Control.Monad.Reader
 
 import Database.Persist.Sql as DB
@@ -43,32 +41,6 @@ readClientMetadata = do
              , syncFileMetaTime = clientFileTime
              }))
       cfs
-
-writeClientMetadata ::
-     forall m. MonadIO m
-  => MetaMap
-  -> SqlPersistT m ()
-writeClientMetadata mm = do
-  let m = metaMapFiles mm
-  deleteWhere [ClientFilePath /<-. M.keys m]
-  void $ M.traverseWithKey go m
-  where
-    go :: Path Rel File -> SyncFileMeta -> SqlPersistT m ()
-    go path SyncFileMeta {..} =
-      void $
-      upsertBy
-        (UniquePath path)
-        (ClientFile
-           { clientFileUuid = syncFileMetaUUID
-           , clientFilePath = path
-           , clientFileSha256 = syncFileMetaHash
-           , clientFileHash = syncFileMetaHashOld
-           , clientFileTime = syncFileMetaTime
-           })
-        [ ClientFileHash =. syncFileMetaHashOld
-        , ClientFileSha256 =. syncFileMetaHash
-        , ClientFileTime =. syncFileMetaTime
-        ]
 
 -- | We only check the synced items, because it should be the case that
 -- they're the only ones that are not empty.
