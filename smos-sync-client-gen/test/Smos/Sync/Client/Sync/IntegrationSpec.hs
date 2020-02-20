@@ -156,13 +156,23 @@ singleClientDeletionSpec =
 
 singleClientLargeSyncSpec :: SpecWith ClientEnv
 singleClientLargeSyncSpec =
-  it "can sync a large store" $ \cenv ->
-    forAll (sizedContentsMap 1000) $ \m ->
-      withNewRegisteredUser cenv $ \r ->
-        withSyncClient cenv r $ \c -> do
-          setupClientContents c m
-          testSyncSmosClient c
-          assertClientContents c m
+  describe "Large" $ do
+    it "can sync a large store" $ \cenv ->
+      forAll (sizedContentsMap 1000) $ \m ->
+        withNewRegisteredUser cenv $ \r ->
+          withSyncClient cenv r $ \c -> do
+            setupClientContents c m
+            testSyncSmosClient c
+            assertClientContents c m
+    it "can sync a store with a long path" $ \cenv ->
+      forAll (sizedPath 2048) $ \p ->
+        forAllValid $ \contents ->
+          let m = CM.singleton p contents
+           in withNewRegisteredUser cenv $ \r ->
+                withSyncClient cenv r $ \c -> do
+                  setupClientContents c m
+                  testSyncSmosClient c
+                  assertClientContents c m
 
 twoClientSpec :: SpecWith ClientEnv
 twoClientSpec =

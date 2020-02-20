@@ -8,6 +8,8 @@ import Data.GenValidity
 import qualified Data.Map as M
 import Data.Maybe
 
+import Control.Monad
+
 import Path
 
 import Test.QuickCheck
@@ -55,6 +57,12 @@ sizedContentsMap i = do
           Nothing -> ins cm
           Just cm' -> pure cm'
   ins contentsMap
+
+singletonContentsMapWithSizedPath :: Int -> Gen ContentsMap
+singletonContentsMapWithSizedPath i = CM.singleton <$> sizedPath i <*> genValid
+
+sizedPath :: Int -> Gen (Path Rel File)
+sizedPath i = replicateM i (pure 'a') `suchThatMap` parseRelFile
 
 mapWithNewPath :: ContentsMap -> ByteString -> Gen (Path Rel File, ContentsMap)
 mapWithNewPath = mapWithNewByGen genValid
