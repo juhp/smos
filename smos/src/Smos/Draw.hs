@@ -93,7 +93,7 @@ smosDraw SmosConfig {..} ss@SmosState {..} =
           FileSelected -> fileCursorWidget
           ReportSelected -> reportCursorWidget
           HelpSelected -> helpCursorWidget
-      debugWidget = [drawDebug ss | editorCursorDebug]
+      debugWidget = [drawDebug ss | editorCursorDebug] ++ [str $ show smosStateLastClick]
       baseWidget = [vBox $ mainCursorWidget : debugWidget]
    in baseWidget
   where
@@ -517,6 +517,7 @@ drawEntry tc edc e = do
   lbw <- drawLogbook entryLogbook
   shw <- drawStateHistory entryStateHistory
   pure $
+    clickable (ResourceEntry entryHeader) $
     vBox $
     catMaybes
       [ Just $
@@ -836,13 +837,13 @@ drawUTCLocal utct = do
 drawTextFieldCursor :: Select -> TextFieldCursor -> Widget ResourceName
 drawTextFieldCursor s =
   case s of
-    MaybeSelected -> selectedTextFieldCursorWidget ResourceTextCursor
+    MaybeSelected -> selectedTextFieldCursorWidget ResourceTextCursorBlinkyBox
     _ -> textFieldCursorWidget
 
 drawTextCursor :: Select -> TextCursor -> Widget ResourceName
 drawTextCursor s =
   case s of
-    MaybeSelected -> selectedTextCursorWidget ResourceTextCursor
+    MaybeSelected -> selectedTextCursorWidget ResourceTextCursorBlinkyBox
     _ -> textCursorWidget
 
 type DrawEnv = ZonedTime

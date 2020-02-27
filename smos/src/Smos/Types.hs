@@ -225,6 +225,7 @@ data SmosState =
     , smosStateLastSaved :: !UTCTime
     , smosStateUnsavedChanges :: !Bool
     , smosStateDebugInfo :: !DebugInfo
+    , smosStateLastClick :: Maybe Header
     }
   deriving (Generic)
 
@@ -260,8 +261,9 @@ data Precedence
   deriving (Show, Eq, Ord)
 
 data ResourceName
-  = ResourceTextCursor
+  = ResourceTextCursorBlinkyBox
   | ResourceViewport
+  | ResourceEntry Header
   deriving (Show, Eq, Ord, Generic)
 
 stop :: Action

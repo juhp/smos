@@ -583,7 +583,7 @@ validateTodoStateChar = validateHeaderChar
 
 newtype StateHistory =
   StateHistory
-    { unStateHistory :: [StateHistoryEntry]
+    { unStateHistory :: [StateHistoryEntry] -- In reverse chronological order: Newest first
     }
   deriving (Show, Eq, Ord, Generic, FromJSON, ToJSON, ToYaml)
 

@@ -17,7 +17,14 @@ import System.Exit
 
 import Brick.BChan as Brick
 import Brick.Main as Brick
-import Graphics.Vty as Vty (defaultConfig, mkVty)
+import Graphics.Vty as Vty
+  ( Mode(Mouse)
+  , defaultConfig
+  , mkVty
+  , outputIface
+  , setMode
+  , standardIOConfig
+  )
 
 import Smos.Data
 
@@ -54,7 +61,10 @@ startSmosOn p sc@SmosConfig {..} = do
       zt <- getZonedTime
       let s = initState zt p fl startF
       chan <- Brick.newBChan maxBound
-      let vtyBuilder = mkVty defaultConfig
+      let vtyBuilder = do
+            v <- Vty.mkVty =<< Vty.standardIOConfig
+            Vty.setMode (Vty.outputIface v) Vty.Mouse True
+            return v
       initialVty <- vtyBuilder
       Left s' <-
         race

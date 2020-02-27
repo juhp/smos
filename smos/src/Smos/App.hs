@@ -40,7 +40,7 @@ mkSmosApp sc@SmosConfig {..} =
     }
 
 smosChooseCursor :: s -> [CursorLocation ResourceName] -> Maybe (CursorLocation ResourceName)
-smosChooseCursor _ = showCursorNamed ResourceTextCursor
+smosChooseCursor _ = showCursorNamed ResourceTextCursorBlinkyBox
 
 smosHandleEvent :: SmosConfig -> SmosState -> Event -> EventM ResourceName (Next SmosState)
 smosHandleEvent cf s e = do
@@ -102,6 +102,8 @@ keyMapFunc s e km = handleRaw $ currentKeyMappings km $ smosStateCursor s
                        , smosStateCursor = editorCursorUpdateTime now $ smosStateCursor s_
                        })
             SmosSaveFile -> EventActivated saveCurrentSmosFile
+        MouseDown (ResourceEntry h) Vty.BLeft _ _ ->
+          EventActivated $ modify (\s_ -> s_ {smosStateLastClick = Just h})
         _ -> NothingActivated
 
 data EventResult
@@ -135,6 +137,7 @@ initState zt p fl msf =
     , smosStateUnsavedChanges = False
     , smosStateLastSaved = zonedTimeToUTC zt
     , smosStateDebugInfo = DebugInfo {debugInfoLastMatches = Nothing}
+    , smosStateLastClick = Nothing
     }
 
 initStateWithCursor :: ZonedTime -> Path Abs File -> FileLock -> EditorCursor -> SmosState
@@ -151,4 +154,5 @@ initStateWithCursor zt p fl ec =
     , smosStateUnsavedChanges = False
     , smosStateLastSaved = zonedTimeToUTC zt
     , smosStateDebugInfo = DebugInfo {debugInfoLastMatches = Nothing}
+    , smosStateLastClick = Nothing
     }
