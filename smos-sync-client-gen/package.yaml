@@ -18,8 +18,12 @@ library:
   - async
   - bytestring
   - containers
+  - filepath
   - genvalidity
+  - genvalidity-bytestring
+  - genvalidity-containers
   - genvalidity-hspec
+  - genvalidity-path
   - hspec
   - hspec-core
   - http-client
@@ -60,6 +64,7 @@ tests:
     - bytestring
     - containers
     - genvalidity
+    - genvalidity-bytestring
     - genvalidity-hspec
     - genvalidity-hspec-aeson
     - genvalidity-hspec-optics
