@@ -30,12 +30,25 @@ instance (Ord a, GenValid a) => GenValid (DirForest a) where
         let genStr = genListOf (genValid `suchThat` (not . isUtf16SurrogateCodePoint))
          in oneof
               [ do rf <- filename <$> (genValid :: Gen (Path Rel File))
-                  -- ((genStr `suchThatMap` parseRelFile) `suchThat` isValid :: Gen (Path Rel File))
                    dt <- NodeFile <$> genValid
                    pure (fromRelFile rf, dt)
               , do rd <- dirname <$> (genValid :: Gen (Path Rel Dir))
-                  -- ((genStr `suchThatMap` (parseRelDir . (++ "/"))) `suchThat` isValid :: Gen (Path Rel Dir))
                    dt <- NodeDir <$> (genValid `suchThat` (not . M.null . unDirForest))
                    pure (FP.dropTrailingPathSeparator $ fromRelDir rd, dt)
               ]
   shrinkValid = shrinkValidStructurally
+
+sizedDirForest :: (Ord a, GenValid a) => Int -> Gen (DirForest a)
+sizedDirForest 0 = pure emptyDirForest
+sizedDirForest s = scale (`quot` s) $ go s
+  where
+    go 0 = pure emptyDirForest
+    go i = do
+      df <- go (i - 1)
+      let ins = do
+            fp <- genValid
+            a <- genValid
+            case insertDirForest fp a df of
+              Left _ -> ins
+              Right df' -> pure df'
+      ins

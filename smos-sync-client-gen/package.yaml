@@ -115,3 +115,4 @@ benchmarks:
     - smos-sync-client
     - smos-sync-client-gen
     - genvalidity
+    - bytestring
