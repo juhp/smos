@@ -40,25 +40,37 @@ instance Validity MetaMap where
       [ genericValidate mm,
         declare "The uuids are distinct" $
           let distinct ls = nub ls == ls
-           in distinct $ map syncFileMetaUUID $ M.elems $ metaMapFiles mm
+           in distinct $ map syncFileMetaUUID $ M.elems $ dirForestToMap $ metaMapFiles mm
       ]
 
 instance NFData MetaMap
 
 empty :: MetaMap
-empty = MetaMap M.empty
+empty = MetaMap emptyDirForest
 
 singleton :: Path Rel File -> SyncFileMeta -> MetaMap
-singleton k v = MetaMap $ M.singleton k v
+singleton k v = MetaMap $ singletonDirForest k v
 
 fromList :: [(Path Rel File, SyncFileMeta)] -> Maybe MetaMap
-fromList = constructValid . MetaMap . M.fromList
+fromList tups = do
+  df <- case dirForestFromMap $ M.fromList tups of
+    Left _ -> Nothing
+    Right r -> Just r
+  constructValid $ MetaMap df
 
 insert :: Path Rel File -> SyncFileMeta -> MetaMap -> Maybe MetaMap
-insert k v (MetaMap m) = constructValid $ MetaMap $ M.insert k v m
+insert k v (MetaMap m) = do
+  df <- case insertDirForest k v m of
+    Left _ -> Nothing
+    Right r -> Just r
+  constructValid $ MetaMap df
 
 union :: MetaMap -> MetaMap -> Maybe MetaMap
-union (MetaMap m1) (MetaMap m2) = constructValid $ MetaMap $ M.union m1 m2
+union (MetaMap m1) (MetaMap m2) = do
+  df <- case unionDirForest m1 m2 of
+    Left _ -> Nothing
+    Right r -> Just r
+  constructValid $ MetaMap df
 
 unions :: [MetaMap] -> Maybe MetaMap
 unions = foldM union empty

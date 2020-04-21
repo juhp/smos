@@ -229,13 +229,13 @@ filterHiddenDirForest = fromMaybe emptyDirForest . goForest
     hidden ('.' : _) = True
     hidden _ = False
 
-differenceDirForest :: forall a. DirForest a -> DirForest a -> DirForest a
+differenceDirForest :: forall a b. DirForest a -> DirForest b -> DirForest a
 differenceDirForest = goForest "" -- Because "" </> "anything" = "anything"
   where
-    goForest :: FilePath -> DirForest a -> DirForest a -> DirForest a
+    goForest :: FilePath -> DirForest a -> DirForest b -> DirForest a
     goForest base (DirForest df1) (DirForest df2) =
       DirForest $ M.differenceWithKey (\p dt1 dt2 -> goTree (base FP.</> p) dt1 dt2) df1 df2
-    goTree :: FilePath -> DirTree a -> DirTree a -> Maybe (DirTree a)
+    goTree :: FilePath -> DirTree a -> DirTree b -> Maybe (DirTree a)
     goTree base dt1 dt2 = case (dt1, dt2) of
       (NodeFile _, _) -> Nothing -- TODO do we want to distinguisg between the two cases on the right?
       (NodeDir df, NodeFile _) -> Nothing -- TODO not sure that these are the right semantics

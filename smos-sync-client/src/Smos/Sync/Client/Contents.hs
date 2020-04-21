@@ -71,7 +71,11 @@ saveContentsMap igf dir cm = do
     Just bs -> SB.writeFile (toFilePath $ dir </> p) bs -- TODO this seems a bit wasteful ..
   let leftovers = files `differenceDirForest` found
   ensureDir dir
-  void $ writeDirForest dir (filterDirForest (\rf _ -> filePred rf) leftovers) (\p cts -> SB.writeFile (fromAbsFile p) cts)
+  writeContentsMap dir (filterDirForest (\rf _ -> filePred rf) leftovers)
+
+writeContentsMap :: Path Abs Dir -> ContentsMap -> IO ()
+writeContentsMap dir df = do
+  writeDirForest dir df (\p cts -> SB.writeFile (fromAbsFile p) cts)
 
 isHidden :: Path Rel File -> Bool
 isHidden = go
