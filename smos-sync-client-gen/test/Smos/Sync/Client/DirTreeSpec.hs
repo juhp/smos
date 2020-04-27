@@ -120,6 +120,16 @@ spec = do
       "produces valid dir forests"
       producesValidsOnValids
       unionsDirForest
+  describe "nullDirForest" $
+    it
+      "produces valid dir forests"
+      producesValidsOnValids
+      nullDirForest
+  describe "intersectionDirForest" $
+    it
+      "produces valid dir forests"
+      producesValidsOnValids2
+      intersectionDirForest
   describe "filterDirForest" $ do
     it
       "produces valid dir forests for const True"

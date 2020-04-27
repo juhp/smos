@@ -84,7 +84,7 @@ mapsWithDifferentContentsAtNewPath3 cm = do
                   )
 
 changedContentsMap :: ContentsMap -> Gen ContentsMap
-changedContentsMap (ContentsMap m) = ContentsMap <$> changedMap m
+changedContentsMap = changedDirForest
 
 changedMapsWithUnionOf :: ContentsMap -> Gen (ContentsMap, ContentsMap)
 changedMapsWithUnionOf cm =
@@ -149,7 +149,7 @@ twoDistinctPathsThatFitAndTheirUnionsWithFunc ::
       Path Rel File,
       Hidden (ByteString -> ByteString -> (ContentsMap, ContentsMap, ContentsMap))
     )
-twoDistinctPathsThatFitAndTheirUnionsWithFunc cm@(ContentsMap m) = do
+twoDistinctPathsThatFitAndTheirUnionsWithFunc cm = do
   rp1 <- genValid `suchThat` (\rp -> isJust $ CM.insert rp "" cm)
   rp2 <-
     genValid `suchThat` (/= rp1)
@@ -157,11 +157,7 @@ twoDistinctPathsThatFitAndTheirUnionsWithFunc cm@(ContentsMap m) = do
   pure
     ( rp1,
       rp2,
-      Hidden $ \contents1 contents2 ->
-        ( ContentsMap $ M.insert rp1 contents1 m,
-          ContentsMap $ M.insert rp2 contents2 m,
-          ContentsMap $ M.unions [M.singleton rp1 contents1, M.singleton rp2 contents2, m]
-        )
+      Hidden $ \contents1 contents2 -> fromJust $ (,,) <$> CM.insert rp1 contents1 m <*> CM.insert rp2 contents2 m <*> CM.unions [M.singleton rp1 contents1, M.singleton rp2 contents2, m]
     )
 
 disjunctContentsMap :: ContentsMap -> Gen ContentsMap

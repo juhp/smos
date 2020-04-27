@@ -17,6 +17,8 @@ module Smos.Sync.Client.DirTree
     insertDirForest,
     unionDirForest,
     unionsDirForest,
+    nullDirForest,
+    intersectionDirForest,
     filterDirForest,
     filterHiddenDirForest,
     differenceDirForest,
@@ -61,6 +63,18 @@ data DirTree a
 instance (Validity a, Ord a) => Validity (DirTree a)
 
 instance (NFData a, Ord a) => NFData (DirTree a)
+
+instance Foldable DirTree where
+  foldMap func =
+    \case
+      NodeFile v -> func v
+      NodeDir df -> foldMap func df
+
+instance Traversable DirTree where
+  traverse func =
+    \case
+      NodeFile v -> NodeFile <$> func v
+      NodeDir df -> NodeDir <$> traverse func df
 
 newtype DirForest a
   = DirForest
@@ -109,6 +123,12 @@ instance (Validity a, Ord a) => Validity (DirForest a) where
       ]
 
 instance (NFData a, Ord a) => NFData (DirForest a)
+
+instance Foldable DirForest where
+  foldMap func (DirForest dtm) = foldMap (foldMap func) dtm
+
+instance Traversable DirForest where
+  traverse func (DirForest dtm) = DirForest <$> traverse (traverse func) dtm
 
 emptyDirForest :: DirForest a
 emptyDirForest = DirForest M.empty
@@ -192,6 +212,12 @@ unionDirForest df1 df2 = undefined
 -- TODO make the left a list of errors
 unionsDirForest :: [DirForest a] -> Either (DirForestInsertionError a) (DirForest a)
 unionsDirForest = foldM unionDirForest emptyDirForest
+
+nullDirForest :: DirForest a -> Bool
+nullDirForest = undefined
+
+intersectionDirForest :: DirForest a -> DirForest b -> DirForest a
+intersectionDirForest = undefined
 
 filterDirForest :: forall a. (Path Rel File -> a -> Bool) -> DirForest a -> DirForest a
 filterDirForest filePred = fromMaybe emptyDirForest . goForest "" -- Because "" FP.</> "anything" = "anything"
