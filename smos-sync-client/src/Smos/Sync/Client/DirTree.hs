@@ -298,17 +298,25 @@ filterHiddenDirForest = fromMaybe emptyDirForest . goForest
     hidden ('.' : _) = True
     hidden _ = False
 
-differenceDirForest :: forall a b. DirForest a -> DirForest b -> DirForest a
-differenceDirForest = goForest "" -- Because "" </> "anything" = "anything"
+differenceDirForest :: DirForest a -> DirForest b -> DirForest a
+differenceDirForest = differenceDirForestWith $ \_ _ -> Nothing
+
+differenceDirForestWith :: (a -> b -> Maybe a) -> DirForest a -> DirForest b -> DirForest a
+differenceDirForestWith func = differenceDirForestWithKey $ const func
+
+differenceDirForestWithKey :: forall a b. (Path Rel File -> a -> b -> Maybe a) -> DirForest a -> DirForest b -> DirForest a
+differenceDirForestWithKey func df1 df2 = fromMaybe emptyDirForest $ goForest "" df1 df2 -- Because "" </> "anything" = "anything"
   where
-    goForest :: FilePath -> DirForest a -> DirForest b -> DirForest a
+    goForest :: FilePath -> DirForest a -> DirForest b -> Maybe (DirForest a)
     goForest base (DirForest df1) (DirForest df2) =
-      DirForest $ M.differenceWithKey (\p dt1 dt2 -> goTree (base FP.</> p) dt1 dt2) df1 df2
+      let df' = M.differenceWithKey (\p dt1 dt2 -> goTree (base FP.</> p) dt1 dt2) df1 df2
+       in if M.null df' then Nothing else Just $ DirForest df'
     goTree :: FilePath -> DirTree a -> DirTree b -> Maybe (DirTree a)
     goTree base dt1 dt2 = case (dt1, dt2) of
-      (NodeFile _, _) -> Nothing -- TODO do we want to distinguisg between the two cases on the right?
-      (NodeDir df, NodeFile _) -> Nothing -- TODO not sure that these are the right semantics
-      (NodeDir df1, NodeDir df2) -> Just $ NodeDir $ goForest base df1 df2
+      (NodeFile v1, NodeFile v2) -> NodeFile <$> func (fromJust $ parseRelFile base) v1 v2
+      (NodeFile v, NodeDir _) -> Just $ NodeFile v -- TODO not sure what the semantics are here
+      (NodeDir df, NodeFile _) -> Just $ NodeDir df -- TODO not sure what the semantics are here
+      (NodeDir df1, NodeDir df2) -> NodeDir <$> goForest base df1 df2
 
 data DirForestInsertionError a
   = FileInTheWay (Path Rel File) a
