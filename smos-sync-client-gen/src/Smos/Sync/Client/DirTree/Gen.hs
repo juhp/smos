@@ -18,5 +18,5 @@ instance (Ord a, GenValid a) => GenValid (DirTree a) where
 changedDirForest :: (Ord a, GenValid a) => DirForest a -> Gen (DirForest a)
 changedDirForest = traverse (\v -> genValid `suchThat` (/= v))
 
-disjunctMap :: (Ord a, GenValid a) => DirForest a -> Gen (DirForest a)
-disjunctMap m = genValid `suchThat` (\m' -> nullDirForest $ intersectionDirForest m m')
+disjunctDirForest :: (Ord a, GenValid a) => DirForest a -> Gen (DirForest a)
+disjunctDirForest m = genValid `suchThat` (\m' -> nullDirForest $ intersectionDirForest m m')

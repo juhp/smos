@@ -12,6 +12,8 @@ import Smos.API.Gen ()
 import Smos.Sync.Client.Contents
 import Smos.Sync.Client.ContentsMap
 import qualified Smos.Sync.Client.ContentsMap as CM
+import Smos.Sync.Client.DirTree
+import Smos.Sync.Client.DirTree.Gen
 import Smos.Sync.Client.TestUtils
 import Test.QuickCheck
 
@@ -36,11 +38,7 @@ genHiddenFile =
     ]
 
 filterHiddenFiles :: ContentsMap -> ContentsMap
-filterHiddenFiles = ContentsMap . M.filterWithKey (\p _ -> isHidden p) . contentsMapFiles
-
-instance GenValid ContentsMap where
-  shrinkValid = shrinkValidStructurally
-  genValid = genValidStructurally
+filterHiddenFiles = filterHiddenDirForest
 
 sizedContentsMap :: Int -> Gen ContentsMap
 sizedContentsMap 0 = pure CM.empty
@@ -100,7 +98,7 @@ mapWithAdditions cm = genValid `suchThatMap` (`CM.union` cm)
 
 mapWithHiddenAdditions :: ContentsMap -> Gen ContentsMap
 mapWithHiddenAdditions cm =
-  (ContentsMap . M.fromList <$> genListOf1 ((,) <$> genHiddenFile <*> genValid))
+  ((genListOf1 ((,) <$> genHiddenFile <*> genValid)) `suchThatMap` CM.fromList)
     `suchThatMap` (`CM.union` cm)
 
 -- Not ideal, but oh well
@@ -157,11 +155,19 @@ twoDistinctPathsThatFitAndTheirUnionsWithFunc cm = do
   pure
     ( rp1,
       rp2,
-      Hidden $ \contents1 contents2 -> fromJust $ (,,) <$> CM.insert rp1 contents1 m <*> CM.insert rp2 contents2 m <*> CM.unions [M.singleton rp1 contents1, M.singleton rp2 contents2, m]
+      Hidden $ \contents1 contents2 ->
+        fromJust $
+          (,,) <$> CM.insert rp1 contents1 cm
+            <*> CM.insert rp2 contents2 cm
+            <*> CM.unions
+              [ CM.singleton rp1 contents1,
+                CM.singleton rp2 contents2,
+                cm
+              ]
     )
 
 disjunctContentsMap :: ContentsMap -> Gen ContentsMap
-disjunctContentsMap (ContentsMap m) = (ContentsMap <$> disjunctMap m) `suchThat` isValid
+disjunctContentsMap = disjunctDirForest
 
 mapWithDisjunctUnion :: ContentsMap -> Gen (ContentsMap, ContentsMap)
 mapWithDisjunctUnion cm = disjunctContentsMap cm `suchThatMap` (\cm' -> (,) cm' <$> CM.union cm' cm)
@@ -213,17 +219,17 @@ twoChangedMapsAndTheirUnionsWith ::
         -- m34
       )
     )
-twoChangedMapsAndTheirUnionsWith cm@(ContentsMap m) = do
-  cm1@(ContentsMap m1) <- genValid `suchThat` (\cm1 -> isJust $ CM.union cm1 cm)
-  cm2@(ContentsMap m2) <- genValid `suchThat` (\cm2 -> isJust $ CM.unions [cm2, cm1, cm])
-  let cm12 = ContentsMap $ M.unions [m1, m2, m]
-  cm3@(ContentsMap m3) <-
+twoChangedMapsAndTheirUnionsWith cm = do
+  cm1 <- genValid `suchThat` (\cm1 -> isJust $ CM.union cm1 cm)
+  cm2 <- genValid `suchThat` (\cm2 -> isJust $ CM.unions [cm2, cm1, cm])
+  let cm12 = fromJust $ CM.unions [cm1, cm2, cm]
+  cm3 <-
     changedContentsMap cm1 `suchThat` (\cm3 -> isJust $ CM.unions [cm3, cm2, cm1, cm])
-  cm4@(ContentsMap m4) <-
+  cm4 <-
     changedContentsMap cm2 `suchThat` (\cm4 -> isJust $ CM.unions [cm4, cm3, cm2, cm1, cm])
-  let cm14 = ContentsMap $ M.unions [m1, m4, m]
-  let cm23 = ContentsMap $ M.unions [m2, m3, m]
-  let cm34 = ContentsMap $ M.unions [m3, m4, m]
+  let cm14 = fromJust $ CM.unions [cm1, cm4, cm]
+  let cm23 = fromJust $ CM.unions [cm2, cm3, cm]
+  let cm34 = fromJust $ CM.unions [cm3, cm4, cm]
   pure ((cm1, cm2), (cm3, cm4), (cm12, cm14, cm23, cm34))
 
 threeDisjunctMapsAndTheirUnions ::
@@ -246,14 +252,14 @@ threeDisjunctMapsAndTheirUnions ::
       )
     )
 threeDisjunctMapsAndTheirUnions = do
-  cm1@(ContentsMap m1) <- genValid
-  cm2@(ContentsMap m2) <- disjunctContentsMap cm1 `suchThat` (\cm2 -> isJust $ CM.union cm2 cm1)
-  let cm12 = ContentsMap $ M.union m1 m2
-  cm3@(ContentsMap m3) <-
+  cm1 <- genValid
+  cm2 <- disjunctContentsMap cm1 `suchThat` (\cm2 -> isJust $ CM.union cm2 cm1)
+  let cm12 = fromJust $ CM.union cm1 cm2
+  cm3 <-
     disjunctContentsMap cm12 `suchThat` (\cm3 -> isJust $ CM.unions [cm3, cm2, cm1])
-  let cm23 = ContentsMap $ M.union m2 m3
-  let cm13 = ContentsMap $ M.union m1 m3
-  let cm123 = ContentsMap $ M.unions [m1, m2, m3]
+  let cm23 = fromJust $ CM.union cm2 cm3
+  let cm13 = fromJust $ CM.union cm1 cm3
+  let cm123 = fromJust $ CM.unions [cm1, cm2, cm3]
   pure ((cm1, cm2, cm3), (cm12, cm23, cm13, cm123))
 
 newtype Hidden a

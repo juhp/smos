@@ -8,8 +8,11 @@ module Smos.Sync.Client.ContentsMap
     empty,
     singleton,
     insert,
+    fromList,
+    toList,
     union,
     unions,
+    contentsMapFiles,
   )
 where
 
@@ -39,6 +42,14 @@ insert rp cs cm = case insertDirForest rp cs cm of
   Left _ -> Nothing
   Right r -> Just r
 
+fromList :: [(Path Rel File, ByteString)] -> Maybe ContentsMap
+fromList tups = case dirForestFromList tups of
+  Left _ -> Nothing
+  Right cm -> Just cm
+
+toList :: ContentsMap -> [(Path Rel File, ByteString)]
+toList = dirForestToList
+
 union :: ContentsMap -> ContentsMap -> Maybe ContentsMap
 union cm1 cm2 = case unionDirForest cm1 cm2 of
   Left _ -> Nothing
@@ -48,3 +59,6 @@ unions :: [ContentsMap] -> Maybe ContentsMap
 unions cms = case unionsDirForest cms of
   Left _ -> Nothing
   Right r -> Just r
+
+contentsMapFiles :: ContentsMap -> Map (Path Rel File) ByteString
+contentsMapFiles = dirForestToMap

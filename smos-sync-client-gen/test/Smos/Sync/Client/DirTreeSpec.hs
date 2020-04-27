@@ -110,56 +110,62 @@ spec = do
             case insertDirForest path (contents :: Int) dirForest of
               Left _ -> pure () -- Fine.
               Right dirForest' -> lookupDirForest path dirForest' `shouldBe` Just contents
-  describe "unionDirForest" $
-    it
+  describe "dirForestFromList"
+    $ it
       "produces valid dir forests"
-      producesValidsOnValids2
-      unionDirForest
-  describe "unionsDirForest" $
-    it
+    $ producesValidsOnValids
+      (dirForestFromList @Int)
+  describe "unionDirForest"
+    $ it
       "produces valid dir forests"
-      producesValidsOnValids
-      unionsDirForest
-  describe "nullDirForest" $
-    it
+    $ producesValidsOnValids2
+      (unionDirForest @Int)
+  describe "unionsDirForest"
+    $ it
       "produces valid dir forests"
-      producesValidsOnValids
-      nullDirForest
-  describe "intersectionDirForest" $
-    it
+    $ producesValidsOnValids
+      (unionsDirForest @Int)
+  describe "nullDirForest"
+    $ it
       "produces valid dir forests"
-      producesValidsOnValids2
-      intersectionDirForest
+    $ producesValidsOnValids
+      (nullDirForest @Int)
+  describe "intersectionDirForest"
+    $ it
+      "produces valid dir forests"
+    $ producesValidsOnValids2
+      (intersectionDirForest @Int @Int)
   describe "filterDirForest" $ do
     it
       "produces valid dir forests for const True"
-      producesValidsOnValids
-      (const True)
-      filterDirForest
+      $ producesValidsOnValids
+      $ filterDirForest
+        @Int
+        (const $ const True)
     it
       "produces the same forest for const True"
-      forAllValid
-      $ \df -> filterDirForest (const True) df `shouldBe` df
+      $ forAllValid
+      $ \df -> filterDirForest @Int (const $ const True) df `shouldBe` df
     it
-      "produces valid dir forests for const False"
-      producesValidsOnValids
-      (const False)
-      filterDirForest
+      "produces valid dir forests for const False $"
+      $ producesValidsOnValids
+      $ filterDirForest @Int
+        (const $ const False)
     it
       "produces the empty forest for const False"
-      forAllValid
-      $ \df -> filterDirForest (const False) df `shouldBe` emptyDirForest
+      $ forAllValid
+      $ \df -> filterDirForest @Int (const $ const False) df `shouldBe` emptyDirForest
     it "other tests" pending
   describe "filterDirForest" $ do
     it
       "produces valid dir forests for const True"
-      producesValidsOnValids
-      filterHiddenDirForest
+      $ producesValidsOnValids
+        (filterHiddenDirForest @Int)
   describe "differenceDirForest" $ do
     it
       "produces valid dir forests"
-      producesValidsOnValids2
-      differenceDirForest
+      $ producesValidsOnValids2
+        (differenceDirForest @Int @Int)
     it "other tests" pending
   describe "dirForestToMap" $ do
     it "works for this example with a file"

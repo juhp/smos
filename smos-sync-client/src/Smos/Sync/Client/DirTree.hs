@@ -15,6 +15,8 @@ module Smos.Sync.Client.DirTree
     singletonDirForest,
     lookupDirForest,
     insertDirForest,
+    dirForestFromList,
+    dirForestToList,
     unionDirForest,
     unionsDirForest,
     nullDirForest,
@@ -205,6 +207,12 @@ insertDirForest rp a df = go [reldir|./|] df (FP.splitDirectories $ fromRelFile 
                   df'' <- go newCur df' ds
                   pure $ DirForest $ M.insert d (NodeDir df'') ts
 
+dirForestFromList :: Ord a => [(Path Rel File, a)] -> Either (DirForestInsertionError a) (DirForest a)
+dirForestFromList = foldM (flip $ uncurry insertDirForest) emptyDirForest
+
+dirForestToList :: Ord a => DirForest a -> [(Path Rel File, a)]
+dirForestToList = M.toList . dirForestToMap
+
 -- TODO make the left a list of errors
 unionDirForest :: DirForest a -> DirForest a -> Either (DirForestInsertionError a) (DirForest a)
 unionDirForest df1 df2 = undefined
@@ -214,10 +222,16 @@ unionsDirForest :: [DirForest a] -> Either (DirForestInsertionError a) (DirFores
 unionsDirForest = foldM unionDirForest emptyDirForest
 
 nullDirForest :: DirForest a -> Bool
-nullDirForest = undefined
+nullDirForest (DirForest dtm) = M.null dtm
 
 intersectionDirForest :: DirForest a -> DirForest b -> DirForest a
-intersectionDirForest = undefined
+intersectionDirForest (DirForest dtm1) (DirForest dtm2) = DirForest $ M.intersectionWith intersectionDirTree dtm1 dtm2
+  where
+    intersectionDirTree :: DirTree a -> DirTree b -> DirTree a
+    intersectionDirTree dt1 dt2 = case (dt1, dt2) of
+      (NodeFile v, _) -> NodeFile v -- TODO is this what we want?
+      (NodeDir df1, _) -> NodeDir df1 -- TODO is this what we want?
+      (NodeDir df1, NodeDir df2) -> NodeDir $ intersectionDirForest df1 df2
 
 filterDirForest :: forall a. (Path Rel File -> a -> Bool) -> DirForest a -> DirForest a
 filterDirForest filePred = fromMaybe emptyDirForest . goForest "" -- Because "" FP.</> "anything" = "anything"
