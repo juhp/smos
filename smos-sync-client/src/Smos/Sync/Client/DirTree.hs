@@ -214,23 +214,53 @@ dirForestFromList = foldM (flip $ uncurry insertDirForest) emptyDirForest
 dirForestToList :: Ord a => DirForest a -> [(Path Rel File, a)]
 dirForestToList = M.toList . dirForestToMap
 
-unionDirForest :: Ord a => DirForest a -> DirForest a -> Either (DirForestInsertionError a) (DirForest a)
-unionDirForest df1 df2 = foldM (flip $ uncurry insertDirForest) df1 $ dirForestToList df2
+-- Left-biased
+unionDirForest :: Ord a => DirForest a -> DirForest a -> DirForest a
+unionDirForest = unionDirForestWith const
 
-unionsDirForest :: Ord a => [DirForest a] -> Either (DirForestInsertionError a) (DirForest a)
-unionsDirForest = foldM unionDirForest emptyDirForest
+-- Left-biased
+unionDirForestWith :: Ord a => (a -> a -> a) -> DirForest a -> DirForest a -> DirForest a
+unionDirForestWith func = unionDirForestWithKey (\_ a b -> func a b)
+
+-- Left-biased on same paths
+-- TODO: maybe we want to make this more general?
+unionDirForestWithKey :: forall a. Ord a => (Path Rel File -> a -> a -> a) -> DirForest a -> DirForest a -> DirForest a
+unionDirForestWithKey func = goForest "" -- Because "" FP.</> "anything" = "anything"
+  where
+    goForest :: FilePath -> DirForest a -> DirForest a -> DirForest a
+    goForest base (DirForest dtm1) (DirForest dtm2) = DirForest $ M.unionWithKey (\p m1 m2 -> goTree (base FP.</> p) m1 m2) dtm1 dtm2
+    goTree :: FilePath -> DirTree a -> DirTree a -> DirTree a
+    goTree base dt1 dt2 = case (dt1, dt2) of
+      (NodeDir df1, NodeDir df2) -> NodeDir $ goForest base df1 df2
+      (NodeFile a1, NodeFile a2) -> NodeFile $ func (fromJust $ parseRelFile base) a1 a2
+      (l, _) -> l
+
+unionsDirForest :: Ord a => [DirForest a] -> DirForest a
+unionsDirForest = foldl' unionDirForest emptyDirForest
 
 nullDirForest :: DirForest a -> Bool
 nullDirForest (DirForest dtm) = M.null dtm
 
 intersectionDirForest :: DirForest a -> DirForest b -> DirForest a
-intersectionDirForest (DirForest dtm1) (DirForest dtm2) = DirForest $ M.intersectionWith intersectionDirTree dtm1 dtm2
+intersectionDirForest = intersectionDirForestWith const
+
+intersectionDirForestWith :: (a -> b -> c) -> DirForest a -> DirForest b -> DirForest c
+intersectionDirForestWith func = intersectionDirForestWithKey (\_ a b -> func a b)
+
+intersectionDirForestWithKey :: forall a b c. (Path Rel File -> a -> b -> c) -> DirForest a -> DirForest b -> DirForest c
+intersectionDirForestWithKey func df1 df2 = fromMaybe emptyDirForest $ goForest "" df1 df2 -- Because "" FP.</> "anything" = "anything"
   where
-    intersectionDirTree :: DirTree a -> DirTree b -> DirTree a
-    intersectionDirTree dt1 dt2 = case (dt1, dt2) of
-      (NodeFile v, _) -> NodeFile v -- TODO is this what we want?
-      (NodeDir df1, _) -> NodeDir df1 -- TODO is this what we want?
-      (NodeDir df1, NodeDir df2) -> NodeDir $ intersectionDirForest df1 df2
+    goForest :: FilePath -> DirForest a -> DirForest b -> Maybe (DirForest c)
+    goForest base (DirForest dtm1) (DirForest dtm2) =
+      let df' = M.mapMaybe id $ M.intersectionWithKey (\p m1 m2 -> goTree (base FP.</> p) m1 m2) dtm1 dtm2
+       in if M.null df'
+            then Nothing
+            else Just $ DirForest df'
+    goTree :: FilePath -> DirTree a -> DirTree b -> Maybe (DirTree c)
+    goTree base dt1 dt2 = case (dt1, dt2) of
+      (NodeDir df1, NodeDir df2) -> NodeDir <$> goForest base df1 df2
+      (NodeFile f1, NodeFile f2) -> Just $ NodeFile $ func (fromJust $ parseRelFile base) f1 f2 -- TODO is this what we want?
+      _ -> Nothing
 
 filterDirForest :: forall a. Show a => (Path Rel File -> a -> Bool) -> DirForest a -> DirForest a
 filterDirForest filePred = fromMaybe emptyDirForest . goForest "" -- Because "" FP.</> "anything" = "anything"

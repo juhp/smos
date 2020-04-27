@@ -86,20 +86,17 @@ changedContentsMap = changedDirForest
 
 changedMapsWithUnionOf :: ContentsMap -> Gen (ContentsMap, ContentsMap)
 changedMapsWithUnionOf cm =
-  ( do
-      cm1 <- genValid
-      cm2 <- changedContentsMap cm1
-      pure (cm1, cm2)
-  )
-    `suchThatMap` (\(cm1, cm2) -> (,) <$> CM.union cm1 cm <*> CM.union cm2 cm)
+  do
+    cm1 <- genValid
+    cm2 <- changedContentsMap cm1
+    pure (CM.union cm1 cm, CM.union cm2 cm)
 
 mapWithAdditions :: ContentsMap -> Gen ContentsMap
-mapWithAdditions cm = genValid `suchThatMap` (`CM.union` cm)
+mapWithAdditions cm = CM.union cm <$> genValid
 
 mapWithHiddenAdditions :: ContentsMap -> Gen ContentsMap
 mapWithHiddenAdditions cm =
-  ((genListOf1 ((,) <$> genHiddenFile <*> genValid)) `suchThatMap` CM.fromList)
-    `suchThatMap` (`CM.union` cm)
+  (CM.union cm <$> ((genListOf1 ((,) <$> genHiddenFile <*> genValid)) `suchThatMap` CM.fromList))
 
 -- Not ideal, but oh well
 genListOf1 :: Gen a -> Gen [a]
@@ -159,18 +156,22 @@ twoDistinctPathsThatFitAndTheirUnionsWithFunc cm = do
         fromJust $
           (,,) <$> CM.insert rp1 contents1 cm
             <*> CM.insert rp2 contents2 cm
-            <*> CM.unions
-              [ CM.singleton rp1 contents1,
-                CM.singleton rp2 contents2,
-                cm
-              ]
+            <*> pure
+              ( CM.unions
+                  [ CM.singleton rp1 contents1,
+                    CM.singleton rp2 contents2,
+                    cm
+                  ]
+              )
     )
 
 disjunctContentsMap :: ContentsMap -> Gen ContentsMap
 disjunctContentsMap = disjunctDirForest
 
 mapWithDisjunctUnion :: ContentsMap -> Gen (ContentsMap, ContentsMap)
-mapWithDisjunctUnion cm = disjunctContentsMap cm `suchThatMap` (\cm' -> (,) cm' <$> CM.union cm' cm)
+mapWithDisjunctUnion cm = do
+  cm' <- disjunctContentsMap cm
+  pure (cm, CM.union cm cm')
 
 twoChangedMapsAndTheirUnions ::
   Gen
@@ -220,16 +221,16 @@ twoChangedMapsAndTheirUnionsWith ::
       )
     )
 twoChangedMapsAndTheirUnionsWith cm = do
-  cm1 <- genValid `suchThat` (\cm1 -> isJust $ CM.union cm1 cm)
-  cm2 <- genValid `suchThat` (\cm2 -> isJust $ CM.unions [cm2, cm1, cm])
-  let cm12 = fromJust $ CM.unions [cm1, cm2, cm]
+  cm1 <- genValid
+  cm2 <- genValid
+  let cm12 = CM.unions [cm1, cm2, cm]
   cm3 <-
-    changedContentsMap cm1 `suchThat` (\cm3 -> isJust $ CM.unions [cm3, cm2, cm1, cm])
+    changedContentsMap cm1
   cm4 <-
-    changedContentsMap cm2 `suchThat` (\cm4 -> isJust $ CM.unions [cm4, cm3, cm2, cm1, cm])
-  let cm14 = fromJust $ CM.unions [cm1, cm4, cm]
-  let cm23 = fromJust $ CM.unions [cm2, cm3, cm]
-  let cm34 = fromJust $ CM.unions [cm3, cm4, cm]
+    changedContentsMap cm2
+  let cm14 = CM.unions [cm1, cm4, cm]
+  let cm23 = CM.unions [cm2, cm3, cm]
+  let cm34 = CM.unions [cm3, cm4, cm]
   pure ((cm1, cm2), (cm3, cm4), (cm12, cm14, cm23, cm34))
 
 threeDisjunctMapsAndTheirUnions ::
@@ -253,13 +254,13 @@ threeDisjunctMapsAndTheirUnions ::
     )
 threeDisjunctMapsAndTheirUnions = do
   cm1 <- genValid
-  cm2 <- disjunctContentsMap cm1 `suchThat` (\cm2 -> isJust $ CM.union cm2 cm1)
-  let cm12 = fromJust $ CM.union cm1 cm2
+  cm2 <- disjunctContentsMap cm1
+  let cm12 = CM.union cm1 cm2
   cm3 <-
-    disjunctContentsMap cm12 `suchThat` (\cm3 -> isJust $ CM.unions [cm3, cm2, cm1])
-  let cm23 = fromJust $ CM.union cm2 cm3
-  let cm13 = fromJust $ CM.union cm1 cm3
-  let cm123 = fromJust $ CM.unions [cm1, cm2, cm3]
+    disjunctContentsMap cm12
+  let cm23 = CM.union cm2 cm3
+  let cm13 = CM.union cm1 cm3
+  let cm123 = CM.unions [cm1, cm2, cm3]
   pure ((cm1, cm2, cm3), (cm12, cm23, cm13, cm123))
 
 newtype Hidden a

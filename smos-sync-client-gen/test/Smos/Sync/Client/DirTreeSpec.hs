@@ -16,6 +16,7 @@ import Smos.Sync.Client.DirTree
 import Smos.Sync.Client.DirTree.Gen
 import Test.Hspec
 import Test.Hspec.QuickCheck
+import Test.QuickCheck
 import Test.Validity
 
 spec :: Spec
@@ -115,11 +116,19 @@ spec = modifyMaxShrinks (const 100) $ do
       "produces valid dir forests"
     $ producesValidsOnValids
       (dirForestFromList @Int)
-  describe "unionDirForest"
-    $ it
-      "produces valid dir forests"
-    $ producesValidsOnValids2
-      (unionDirForest @Int)
+  describe "unionDirForest" $
+    do
+      it
+        "produces valid dir forests"
+        $ producesValidsOnValids2
+          (unionDirForest @Int)
+      it "is associative" $
+        associativeOnValids (unionDirForest @Int)
+      it "is idempotent"
+        $ forAllValid
+        $ \dm1 -> forAllValid $ \dm2 ->
+          let res = dm1 `unionDirForest` dm2
+           in (res `unionDirForest` dm2) `shouldBe` (res :: DirForest Int)
   describe "unionsDirForest"
     $ it
       "produces valid dir forests"
@@ -130,11 +139,22 @@ spec = modifyMaxShrinks (const 100) $ do
       "produces valid dir forests"
     $ producesValidsOnValids
       (nullDirForest @Int)
-  describe "intersectionDirForest"
-    $ it
+  describe "intersectionDirForest" $ do
+    it
       "produces valid dir forests"
-    $ producesValidsOnValids2
-      (intersectionDirForest @Int @Int)
+      $ producesValidsOnValids2
+        (intersectionDirForest @Int @Int)
+    it "is associative" $
+      associativeOnValids (intersectionDirForest @Int @Int)
+    it "is idempotent"
+      $ forAllValid
+      $ \dm1 -> forAllValid $ \dm2 ->
+        let res = (dm1 :: DirForest Int) `intersectionDirForest` (dm2 :: DirForest Int)
+         in (res `intersectionDirForest` dm2) `shouldBe` (res :: DirForest Int)
+    it "should produce an empty list for disjunct dir forests"
+      $ forAllValid
+      $ \dm1 -> forAll (disjunctDirForest dm1) $ \dm2 -> intersectionDirForest @Int @Int dm1 dm2 `shouldBe` emptyDirForest
+    it "shows that any dirforest is its own fixed point" $ forAllValid $ \df -> intersectionDirForest @Int @Int df df `shouldBe` df
   describe "filterDirForest" $ do
     it
       "produces valid dir forests for const True"

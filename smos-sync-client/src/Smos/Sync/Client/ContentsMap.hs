@@ -50,15 +50,11 @@ fromList tups = case dirForestFromList tups of
 toList :: ContentsMap -> [(Path Rel File, ByteString)]
 toList = dirForestToList
 
-union :: ContentsMap -> ContentsMap -> Maybe ContentsMap
-union cm1 cm2 = case unionDirForest cm1 cm2 of
-  Left _ -> Nothing
-  Right r -> Just r
+union :: ContentsMap -> ContentsMap -> ContentsMap
+union = unionDirForest
 
-unions :: [ContentsMap] -> Maybe ContentsMap
-unions cms = case unionsDirForest cms of
-  Left _ -> Nothing
-  Right r -> Just r
+unions :: [ContentsMap] -> ContentsMap
+unions = unionsDirForest
 
 contentsMapFiles :: ContentsMap -> Map (Path Rel File) ByteString
 contentsMapFiles = dirForestToMap

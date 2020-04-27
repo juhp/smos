@@ -66,11 +66,8 @@ insert k v (MetaMap m) = do
   constructValid $ MetaMap df
 
 union :: MetaMap -> MetaMap -> Maybe MetaMap
-union (MetaMap m1) (MetaMap m2) = do
-  df <- case unionDirForest m1 m2 of
-    Left _ -> Nothing
-    Right r -> Just r
-  constructValid $ MetaMap df
+union (MetaMap m1) (MetaMap m2) =
+  constructValid $ MetaMap $ unionDirForest m1 m2
 
 unions :: [MetaMap] -> Maybe MetaMap
-unions = foldM union empty
+unions = constructValid . MetaMap . unionsDirForest . map metaMapFiles
