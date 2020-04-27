@@ -19,7 +19,7 @@ import Test.Hspec.QuickCheck
 import Test.Validity
 
 spec :: Spec
-spec = do
+spec = modifyMaxShrinks (const 100) $ do
   genValidSpec @(DirTree Int8)
   genValidSpec @(DirForest Int8)
   describe "emptyDirForest" $ it "is valid" $ shouldBeValid (emptyDirForest @Int)
@@ -147,7 +147,7 @@ spec = do
       $ forAllValid
       $ \df -> filterDirForest @Int (const $ const True) df `shouldBe` df
     it
-      "produces valid dir forests for const False $"
+      "produces valid dir forests for const False"
       $ producesValidsOnValids
       $ filterDirForest @Int
         (const $ const False)

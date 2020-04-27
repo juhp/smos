@@ -52,6 +52,7 @@ import Data.Validity.Containers ()
 import Data.Validity.Map
 import Data.Validity.Path
 import Data.Word
+import Debug.Trace
 import GHC.Generics (Generic)
 import Path
 import Path.IO
@@ -81,7 +82,7 @@ instance Traversable DirTree where
 newtype DirForest a
   = DirForest
       { unDirForest :: Map FilePath (DirTree a)
-      }
+      } -- TODO change 'FilePath' to something more sensible like a FileOrDir, maybe?
   deriving (Show, Eq, Ord, Generic, Functor)
 
 instance (Validity a, Ord a) => Validity (DirForest a) where
@@ -213,12 +214,10 @@ dirForestFromList = foldM (flip $ uncurry insertDirForest) emptyDirForest
 dirForestToList :: Ord a => DirForest a -> [(Path Rel File, a)]
 dirForestToList = M.toList . dirForestToMap
 
--- TODO make the left a list of errors
-unionDirForest :: DirForest a -> DirForest a -> Either (DirForestInsertionError a) (DirForest a)
-unionDirForest df1 df2 = undefined
+unionDirForest :: Ord a => DirForest a -> DirForest a -> Either (DirForestInsertionError a) (DirForest a)
+unionDirForest df1 df2 = foldM (flip $ uncurry insertDirForest) df1 $ dirForestToList df2
 
--- TODO make the left a list of errors
-unionsDirForest :: [DirForest a] -> Either (DirForestInsertionError a) (DirForest a)
+unionsDirForest :: Ord a => [DirForest a] -> Either (DirForestInsertionError a) (DirForest a)
 unionsDirForest = foldM unionDirForest emptyDirForest
 
 nullDirForest :: DirForest a -> Bool
@@ -233,7 +232,7 @@ intersectionDirForest (DirForest dtm1) (DirForest dtm2) = DirForest $ M.intersec
       (NodeDir df1, _) -> NodeDir df1 -- TODO is this what we want?
       (NodeDir df1, NodeDir df2) -> NodeDir $ intersectionDirForest df1 df2
 
-filterDirForest :: forall a. (Path Rel File -> a -> Bool) -> DirForest a -> DirForest a
+filterDirForest :: forall a. Show a => (Path Rel File -> a -> Bool) -> DirForest a -> DirForest a
 filterDirForest filePred = fromMaybe emptyDirForest . goForest "" -- Because "" FP.</> "anything" = "anything"
   where
     goForest :: FilePath -> DirForest a -> Maybe (DirForest a)
@@ -242,7 +241,7 @@ filterDirForest filePred = fromMaybe emptyDirForest . goForest "" -- Because "" 
             M.mapMaybeWithKey
               (\p dt -> goTree (base FP.</> p) dt)
               df
-       in if M.null df
+       in if M.null df'
             then Nothing
             else Just (DirForest df')
     goTree :: FilePath -> DirTree a -> Maybe (DirTree a) -- Nothing means it will be removed
