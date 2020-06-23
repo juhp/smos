@@ -17,12 +17,15 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Text (Text)
+import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Lazy as Lazy
 import Data.Time
 import Data.Time.Calendar.OrdinalDate
 import Data.Time.Calendar.WeekDate
+import Data.Yaml as Yaml
 import Lens.Micro
-import Network.HTTP.Simple (getResponseBody, httpLBS, parseRequest)
+import Network.HTTP.Client as HTTP (httpLbs, requestFromURI, responseBody)
+import Network.HTTP.Client.TLS as HTTP
 import Path
 import Smos.Calendar.Import.OptParse
 import Smos.Data
@@ -31,6 +34,7 @@ import System.Exit
 import Text.ICalendar.Parser
 import Text.ICalendar.Types as ICal
 import Text.Show.Pretty
+import YamlParse.Applicative
 
 -- Given a list of sources (basically ics files) we want to produce a single smos file (like calendar.smos) that contains all the events.
 -- For each event we want an entry with the description in the header.
@@ -61,38 +65,98 @@ smosCalendarImport = do
   let start = addDays (-7) today
   let recurrenceLimit = addDays 30 today
   hereTZ <- getCurrentTimeZone
-  fs <- forM (NE.toList setSources) $ \source -> do
-    errOrCal <- case parseAbsFile source of
-      Nothing -> do
-        req <- parseRequest source
-        putStrLn $ "Fetching: " <> source
-        resp <- httpLBS req
-        let errOrCal = parseICalendar def source $ getResponseBody resp
+  man <- HTTP.newTlsManager
+  forM_ (NE.toList setSources) $ \Source {..} -> do
+    let originName = case sourceName of
+          Just n -> n
+          Nothing -> case sourceOrigin of
+            WebOrigin uri -> show uri
+            FileOrigin fp -> fromAbsFile fp
+    errOrCal <- case sourceOrigin of
+      WebOrigin uri -> do
+        req <- requestFromURI uri
+        putStrLn $ "Fetching: " <> show uri
+        resp <- httpLbs req man
+        let errOrCal = parseICalendar def (show uri) $ responseBody resp
         pure errOrCal
-      Just af -> parseICalendarFile def $ fromAbsFile af
+      FileOrigin af -> parseICalendarFile def $ fromAbsFile af
     case errOrCal of
       Left err -> die err
       Right (cals, warnings) -> do
         forM_ warnings $ \warning -> putStrLn $ "WARNING: " <> warning
-        pure $ processCalendars setDebug start recurrenceLimit hereTZ cals
-  wd <- resolveDirWorkflowDir setDirectorySettings
-  let fp = wd </> setDestinationFile
-  writeSmosFile fp $ SmosFile $ sorter $ concat fs
+        let conf =
+              ProcessConf
+                { processConfDebug = setDebug,
+                  processConfStart = start,
+                  processConfLimit = recurrenceLimit,
+                  processConfTimeZone = hereTZ,
+                  processConfName = originName
+                }
+        when setDebug $ putStrLn $ unlines ["Using process conf: ", T.unpack (TE.decodeUtf8 (Yaml.encode conf))]
+        let sf = processCalendars conf cals
+        wd <- resolveDirWorkflowDir setDirectorySettings
+        putStrLn $ "Saving to " <> fromRelFile sourceDestinationFile
+        let fp = wd </> sourceDestinationFile
+        writeSmosFile fp sf
+
+data ProcessConf
+  = ProcessConf
+      { processConfDebug :: Bool,
+        processConfStart :: Day,
+        processConfLimit :: Day,
+        processConfTimeZone :: TimeZone,
+        processConfName :: String
+      }
+  deriving (Show, Eq)
+
+instance ToJSON ProcessConf where
+  toJSON ProcessConf {..} =
+    object $
+      (if processConfDebug then (("debug" .= processConfDebug) :) else id)
+        [ "start" .= formatTime defaultTimeLocale timestampDayFormat processConfStart,
+          "limit" .= formatTime defaultTimeLocale timestampDayFormat processConfLimit,
+          "timezone" .= formatTime defaultTimeLocale timeZoneFormat processConfTimeZone,
+          "name" .= processConfName
+        ]
+
+instance FromJSON ProcessConf where
+  parseJSON = viaYamlSchema
+
+instance YamlSchema ProcessConf where
+  yamlSchema =
+    let dayField = maybeParser (parseTimeM True defaultTimeLocale timestampDayFormat) yamlSchema <?> T.pack timestampDayFormat
+        timeZoneField = maybeParser (parseTimeM True defaultTimeLocale timeZoneFormat) yamlSchema <?> T.pack timeZoneFormat
+     in objectParser "ProcessConf" $
+          ProcessConf
+            <$> optionalFieldWithDefault "debug" False "debug mode"
+            <*> requiredFieldWith "start" "start day" dayField
+            <*> requiredFieldWith "limit" "recurrence limit" dayField
+            <*> requiredFieldWith "timezone" "time zone" timeZoneField
+            <*> requiredField "name" "calendar name"
+
+timeZoneFormat :: String
+timeZoneFormat = "%z"
+
+processCalendars :: ProcessConf -> [VCalendar] -> SmosFile
+processCalendars ProcessConf {..} vcals = SmosFile [titleNode $ sorter $ concatMap goCal vcals]
   where
     sorter = sortOn (entryTimestamps . rootLabel)
-
-processCalendars :: Bool -> Day -> Day -> TimeZone -> [VCalendar] -> Forest Entry
-processCalendars debug start recurrenceLimit hereTZ = concatMap goCal
-  where
+    titleNode :: Forest Entry -> Tree Entry
+    titleNode = Node ((newEntry titleHeader) {entryContents = titleContents})
+    titleHeader = fromMaybe "Invalid title name" $ header (T.pack processConfName)
+    titleContents =
+      if processConfDebug
+        then contents $ T.pack $ ppShow vcals
+        else Nothing
     goCal :: VCalendar -> Forest Entry
     goCal cal =
       let env =
             ImportEnv
-              { importEnvTimeZone = hereTZ,
-                importEnvStartDay = start,
-                importEnvRecurrentLimit = recurrenceLimit,
+              { importEnvTimeZone = processConfTimeZone,
+                importEnvStartDay = processConfStart,
+                importEnvRecurrentLimit = processConfLimit,
                 importEnvNamedTimeZones = vcTimeZones cal,
-                importEnvDebug = debug
+                importEnvDebug = processConfDebug
               }
        in runReader (processEvents (vcEvents cal)) env
 
@@ -113,7 +177,7 @@ processEvents m = fmap catMaybes $ mapM (\(_, v) -> processEvent v) $ M.toList m
 
 processEvent :: VEvent -> I (Maybe (Tree Entry))
 processEvent ve = do
-  let mDesc = eventDescription ve -- We must not miss any time
+  let mDesc = eventDescription ve
   mContents <- eventContents ve
   let firstTimestamps = eventFirstTimestamps ve
   recurrenceTimestamps <- processRecurrences (S.map rRuleValue $ veRRule ve) firstTimestamps
@@ -130,7 +194,10 @@ eventContents ve = do
   pure $
     if debug
       then contents $ T.pack $ ppShow ve
-      else Nothing
+      else do
+        t <- Lazy.toStrict . descriptionValue <$> veDescription ve
+        guard $ not $ T.null t
+        contents t
 
 data EventTimestamps
   = EventTimestamps
@@ -183,7 +250,7 @@ eventTimestampsBefore st ets = case eventTimestampsStart ets of
   Just st' -> go st'
   where
     go :: StartTime -> Bool
-    go st' = ((<=) `on` (\t -> t ^. startTimeDayL)) st st' -- TODO This might make an event too much?
+    go st' = ((<=) `on` (\t -> t ^. startTimeDayL)) st' st -- TODO This might make an event too much?
 
 data EndTime
   = EndTimeStart StartTime -- It's not a start time but it has the same idea
